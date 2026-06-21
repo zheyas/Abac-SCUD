@@ -1,0 +1,149 @@
+{% extends "admin_base.html" %}
+{% block title %}Здания — СКУД{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="page-kicker">Инфраструктура</div>
+        <h1>Здания</h1>
+        <p>Положение на карте, габариты, режим работы и правила общего доступа.</p>
+    </div>
+    <div class="page-count"><strong>{{ buildings|length }}</strong><span>объектов</span></div>
+</header>
+
+<section class="admin-card">
+    <div class="card-heading">
+        <div><h2>Новый объект</h2><p>После создания здание сразу появится на 3D-карте.</p></div>
+        <span class="section-badge">Добавление</span>
+    </div>
+    <form id="create-building-form" class="form-grid">
+        <label class="field span-3"><span>Название</span><input class="control" type="text" name="name" placeholder="Например, Склад" required></label>
+        <label class="field span-2"><span>Цвет</span><input class="control" type="color" name="color_hex" value="#6f8798"></label>
+        <label class="field span-2"><span>Координаты X / Z</span><span class="inline-controls" style="grid-template-columns:1fr 1fr"><span class="input-prefix"><span>X</span><input class="control" type="number" name="x" value="300"></span><span class="input-prefix"><span>Z</span><input class="control" type="number" name="y" value="300"></span></span></label>
+        <label class="field span-3"><span>Ширина / высота / глубина</span><span class="inline-controls"><input class="control" type="number" name="w" value="100" min="10"><input class="control" type="number" name="h" value="80" min="10"><input class="control" type="number" name="depth" value="30" min="10"></span></label>
+        <label class="field span-2"><span>Рабочие дни</span><input class="control" type="text" name="open_days" value="Mon,Tue,Wed,Thu,Fri" title="All или Mon,Tue,Wed,Thu,Fri"></label>
+        <label class="field span-2"><span>Открытие</span><input class="control" type="time" name="open_time" value="08:00"></label>
+        <label class="field span-2"><span>Закрытие</span><input class="control" type="time" name="close_time" value="20:00"></label>
+        <label class="switch-row span-2"><input type="checkbox" name="is_24_hours"> Круглосуточно</label>
+        <label class="switch-row span-2"><input type="checkbox" name="is_accessible_to_all"> Общий доступ</label>
+        <button class="button button-primary span-2" type="submit"><span>＋</span> Создать объект</button>
+    </form>
+</section>
+
+<section>
+    <div class="card-heading">
+        <div><h2>Все здания</h2><p>Изменения сохраняются отдельно для каждого объекта.</p></div>
+    </div>
+    <div class="entity-list" id="buildings-list">
+        {% for b in buildings %}
+        <article class="entity-card building-editor" data-id="{{ b.id }}">
+            <div class="entity-head">
+                <span class="entity-id">#{{ b.id }}</span>
+                <span class="color-swatch" style="--swatch: {{ b.color_hex }}"></span>
+                <input class="control entity-title-control edit-name" type="text" value="{{ b.name }}" aria-label="Название здания {{ b.id }}">
+                <div class="entity-actions">
+                    <button class="button button-ghost save-building" data-id="{{ b.id }}"><span>✓</span> Сохранить</button>
+                    <button class="button button-danger delete-building" data-id="{{ b.id }}"><span>×</span> Удалить</button>
+                </div>
+            </div>
+            <div class="entity-body">
+                <div class="field-group">
+                    <div class="group-title"><i></i>Положение</div>
+                    <div class="group-grid">
+                        <label class="compact-label">Координата X<input class="control edit-x" type="number" value="{{ b.x }}"></label>
+                        <label class="compact-label">Координата Z<input class="control edit-y" type="number" value="{{ b.y }}"></label>
+                    </div>
+                </div>
+                <div class="field-group">
+                    <div class="group-title"><i></i>Габариты</div>
+                    <div class="group-grid three">
+                        <label class="compact-label">Ширина<input class="control edit-w" type="number" min="10" value="{{ b.w }}"></label>
+                        <label class="compact-label">Высота<input class="control edit-h" type="number" min="10" value="{{ b.h }}"></label>
+                        <label class="compact-label">Глубина<input class="control edit-depth" type="number" min="10" value="{{ b.depth }}"></label>
+                    </div>
+                </div>
+                <div class="field-group">
+                    <div class="group-title"><i></i>Режим работы</div>
+                    <div class="group-grid three">
+                        <label class="compact-label wide">Рабочие дни<input class="control edit-days" type="text" value="{{ b.open_days }}"></label>
+                        <label class="compact-label">Открытие<input class="control edit-open" type="time" value="{{ b.open_time }}"></label>
+                        <label class="compact-label">Закрытие<input class="control edit-close" type="time" value="{{ b.close_time }}"></label>
+                        <label class="switch-row"><input type="checkbox" class="edit-24" {% if b.is_24_hours %}checked{% endif %}> 24 / 7</label>
+                    </div>
+                </div>
+                <div class="field-group">
+                    <div class="group-title"><i></i>Доступ</div>
+                    <div class="access-controls">
+                        <label class="compact-label">Цвет<input class="control edit-color" type="color" value="{{ b.color_hex }}"></label>
+                        <label class="switch-row"><input type="checkbox" class="edit-all" {% if b.is_accessible_to_all %}checked{% endif %}> Доступен всем</label>
+                    </div>
+                </div>
+            </div>
+        </article>
+        {% else %}
+        <div class="empty-panel">Здания ещё не созданы.</div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const buildingPayload = (card) => ({
+        name: card.querySelector('.edit-name').value.trim(),
+        color_hex: card.querySelector('.edit-color').value,
+        x: Number(card.querySelector('.edit-x').value),
+        y: Number(card.querySelector('.edit-y').value),
+        w: Number(card.querySelector('.edit-w').value),
+        h: Number(card.querySelector('.edit-h').value),
+        depth: Number(card.querySelector('.edit-depth').value),
+        open_days: card.querySelector('.edit-days').value.trim() || 'All',
+        open_time: card.querySelector('.edit-open').value || '08:00',
+        close_time: card.querySelector('.edit-close').value || '20:00',
+        is_24_hours: card.querySelector('.edit-24').checked,
+        is_accessible_to_all: card.querySelector('.edit-all').checked
+    });
+
+    document.getElementById('create-building-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = event.submitter;
+        const formData = new FormData(event.currentTarget);
+        const data = Object.fromEntries(formData.entries());
+        ['x','y','w','h','depth'].forEach(key => data[key] = Number(data[key]));
+        data.is_24_hours = formData.has('is_24_hours');
+        data.is_accessible_to_all = formData.has('is_accessible_to_all');
+        button.disabled = true;
+        try {
+            await adminRequest('/api/admin/buildings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+            showAdminToast('Объект создан');
+            setTimeout(() => location.reload(), 350);
+        } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
+    });
+
+    document.querySelectorAll('.save-building').forEach(button => {
+        button.addEventListener('click', async () => {
+            const card = button.closest('.building-editor');
+            button.disabled = true;
+            try {
+                await adminRequest(`/api/admin/buildings/${button.dataset.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(buildingPayload(card)) });
+                card.querySelector('.color-swatch').style.setProperty('--swatch', card.querySelector('.edit-color').value);
+                showAdminToast('Изменения сохранены');
+            } catch (error) { showAdminToast(error.message, 'error'); }
+            finally { button.disabled = false; }
+        });
+    });
+
+    document.querySelectorAll('.delete-building').forEach(button => {
+        button.addEventListener('click', async () => {
+            const card = button.closest('.building-editor');
+            const name = card.querySelector('.edit-name').value;
+            if (!confirm(`Удалить объект «${name}»?`)) return;
+            button.disabled = true;
+            try {
+                await adminRequest(`/api/admin/buildings/${button.dataset.id}`, { method: 'DELETE' });
+                card.remove();
+                showAdminToast('Объект удалён');
+            } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
+        });
+    });
+</script>
+{% endblock %}

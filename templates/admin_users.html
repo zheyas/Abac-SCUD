@@ -1,0 +1,96 @@
+{% extends "admin_base.html" %}
+{% block title %}Пользователи — СКУД{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="page-kicker">Персонал</div>
+        <h1>Пользователи</h1>
+        <p>Роли, состояние учётных записей и активность рабочих смен.</p>
+    </div>
+    <div class="page-count"><strong>{{ users|length }}</strong><span>аккаунтов</span></div>
+</header>
+
+<section class="admin-card">
+    <div class="card-heading">
+        <div><h2>Новый пользователь</h2><p>Назначьте роль — политики доступа применятся автоматически.</p></div>
+        <span class="section-badge">Добавление</span>
+    </div>
+    <form id="create-user-form" class="form-grid">
+        <label class="field span-4"><span>Логин</span><input class="control" type="text" name="username" placeholder="Логин пользователя" required></label>
+        <label class="field span-4"><span>Пароль</span><input class="control" type="password" name="password" placeholder="Минимум 6 символов" required minlength="6"></label>
+        <label class="field span-2"><span>Роль</span><select class="control" name="role_id">{% for role in roles %}<option value="{{ role.id }}">{{ role.name }}</option>{% endfor %}</select></label>
+        <button class="button button-primary span-2" type="submit"><span>＋</span> Создать</button>
+    </form>
+</section>
+
+<section>
+    <div class="card-heading"><div><h2>Все пользователи</h2><p>Пароль остаётся прежним, если поле не заполнять.</p></div></div>
+    <div class="user-grid">
+        {% for u in users %}
+        <article class="user-card user-editor" data-id="{{ u.id }}">
+            <div class="user-card-head">
+                <span class="avatar">{{ u.username[:1] }}</span>
+                <div class="user-meta"><strong>{{ u.username }}</strong><span>Пользователь #{{ u.id }}</span></div>
+                <div class="user-card-actions">
+                    <button class="button button-ghost save-user" data-id="{{ u.id }}" title="Сохранить">✓</button>
+                    <button class="button button-danger delete-user" data-id="{{ u.id }}" title="Удалить">×</button>
+                </div>
+            </div>
+            <div class="user-fields">
+                <label class="compact-label">Логин<input class="control edit-username" value="{{ u.username }}"></label>
+                <label class="compact-label">Роль<select class="control edit-role">{% for role in roles %}<option value="{{ role.id }}" {% if role.id == u.role_id %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select></label>
+                <label class="compact-label">Смена<select class="control edit-shift"><option value="active" {% if u.shift_status == 'active' %}selected{% endif %}>Активна</option><option value="inactive" {% if u.shift_status == 'inactive' %}selected{% endif %}>Неактивна</option></select></label>
+                <label class="switch-row"><input type="checkbox" class="edit-active" {% if u.is_active %}checked{% endif %}> Активен</label>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('create-user-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = event.submitter;
+        const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+        data.role_id = Number(data.role_id);
+        button.disabled = true;
+        try {
+            await adminRequest('/api/admin/users', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+            showAdminToast('Пользователь создан');
+            setTimeout(() => location.reload(), 350);
+        } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
+    });
+
+    document.querySelectorAll('.save-user').forEach(button => button.addEventListener('click', async () => {
+        const card = button.closest('.user-editor');
+        const data = {
+            username: card.querySelector('.edit-username').value.trim(),
+            role_id: Number(card.querySelector('.edit-role').value),
+            shift_status: card.querySelector('.edit-shift').value,
+            is_active: card.querySelector('.edit-active').checked
+        };
+        button.disabled = true;
+        try {
+            await adminRequest(`/api/admin/users/${button.dataset.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+            card.querySelector('.user-meta strong').textContent = data.username;
+            card.querySelector('.avatar').textContent = data.username.slice(0,1);
+            showAdminToast('Пользователь обновлён');
+        } catch (error) { showAdminToast(error.message, 'error'); }
+        finally { button.disabled = false; }
+    }));
+
+    document.querySelectorAll('.delete-user').forEach(button => button.addEventListener('click', async () => {
+        const card = button.closest('.user-editor');
+        const username = card.querySelector('.edit-username').value;
+        if (!confirm(`Удалить пользователя «${username}»?`)) return;
+        button.disabled = true;
+        try {
+            await adminRequest(`/api/admin/users/${button.dataset.id}`, { method:'DELETE' });
+            card.remove();
+            showAdminToast('Пользователь удалён');
+        } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
+    }));
+</script>
+{% endblock %}
