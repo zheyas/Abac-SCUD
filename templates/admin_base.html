@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#08111f">
+    <title>{% block title %}Администрирование СКУД{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+    <div class="admin-shell">
+        <aside class="admin-sidebar">
+            <a class="admin-brand" href="/admin/buildings">
+                <span class="brand-logo">A</span>
+                <span><strong>СКУД</strong><small>Центр управления</small></span>
+            </a>
+
+            <nav class="admin-nav" aria-label="Разделы администрирования">
+                <div class="nav-label">Управление</div>
+                <a href="/admin/buildings" class="{% if request.path == '/admin/buildings' %}active{% endif %}">
+                    <span class="nav-icon">▦</span><span>Здания</span>
+                </a>
+                <a href="/admin/users" class="{% if request.path == '/admin/users' %}active{% endif %}">
+                    <span class="nav-icon">◉</span><span>Пользователи</span>
+                </a>
+                <a href="/admin/policies" class="{% if request.path == '/admin/policies' %}active{% endif %}">
+                    <span class="nav-icon">≡</span><span>Политики доступа</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-bottom">
+                <a href="/" class="secondary-link"><span>↗</span> Открыть 3D-карту</a>
+                <a href="/api/logout" class="secondary-link danger-link"><span>↪</span> Выйти</a>
+            </div>
+        </aside>
+
+        <main class="admin-main">
+            <header class="admin-topbar">
+                <div>
+                    <span class="online-dot"></span>
+                    <span>Система работает</span>
+                </div>
+                <a href="/" class="map-button">Вернуться на карту <span>→</span></a>
+            </header>
+            <div class="admin-content">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+    <div id="admin-toast" class="admin-toast" role="status"></div>
+    <script>
+        let adminToastTimer;
+        window.showAdminToast = (message, type = 'success') => {
+            const toast = document.getElementById('admin-toast');
+            toast.textContent = message;
+            toast.className = `admin-toast visible ${type}`;
+            clearTimeout(adminToastTimer);
+            adminToastTimer = setTimeout(() => toast.classList.remove('visible'), 2400);
+        };
+        window.adminRequest = async (url, options) => {
+            const response = await fetch(url, options);
+            let payload = {};
+            try { payload = await response.json(); } catch (_) {}
+            if (!response.ok) throw new Error(payload.error || 'Не удалось выполнить операцию');
+            return payload;
+        };
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

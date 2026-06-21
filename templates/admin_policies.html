@@ -1,0 +1,98 @@
+{% extends "admin_base.html" %}
+{% block title %}Политики — СКУД{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="page-kicker">ABAC · Правила</div>
+        <h1>Политики доступа</h1>
+        <p>Свяжите роль со зданием и задайте допустимые дни, часы и требование активной смены.</p>
+    </div>
+    <div class="page-count"><strong>{{ policies|length }}</strong><span>политик</span></div>
+</header>
+
+<section class="admin-card">
+    <div class="card-heading">
+        <div><h2>Новое правило</h2><p>Правило начнёт участвовать в расчёте доступа сразу после создания.</p></div>
+        <span class="section-badge">ABAC</span>
+    </div>
+    <form id="create-policy-form" class="form-grid">
+        <label class="field span-2"><span>Роль</span><select class="control" name="role_id" required>{% for role in roles %}<option value="{{ role.id }}">{{ role.name }}</option>{% endfor %}</select></label>
+        <label class="field span-2"><span>Здание</span><select class="control" name="building_id" required>{% for b in buildings %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}</select></label>
+        <label class="field span-3"><span>Разрешённые дни</span><input class="control" name="days_allowed" value="Mon,Tue,Wed,Thu,Fri" placeholder="All или Mon,Tue..."></label>
+        <label class="field span-2"><span>С</span><input class="control" type="time" name="time_start" value="09:00"></label>
+        <label class="field span-2"><span>До</span><input class="control" type="time" name="time_end" value="18:00"></label>
+        <label class="switch-row span-2"><input type="checkbox" name="requires_shift_active"> Нужна активная смена</label>
+        <button class="button button-primary span-2" type="submit"><span>＋</span> Создать правило</button>
+    </form>
+</section>
+
+<section>
+    <div class="card-heading"><div><h2>Все правила</h2><p>Компактный список с редактированием на месте.</p></div></div>
+    <div class="policy-list">
+        {% for p in policies %}
+        <article class="policy-card policy-editor" data-id="{{ p.id }}">
+            <span class="policy-number">#{{ p.id }}</span>
+            <label class="compact-label">Роль<select class="control edit-role">{% for role in roles %}<option value="{{ role.id }}" {% if role.id == p.role_id %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select></label>
+            <label class="compact-label">Здание<select class="control edit-building">{% for b in buildings %}<option value="{{ b.id }}" {% if b.id == p.building_id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}</select></label>
+            <label class="compact-label policy-days">Дни<input class="control edit-days" value="{{ p.days_allowed }}"></label>
+            <label class="compact-label policy-time">Начало<input class="control edit-start" type="time" value="{{ p.time_start }}"></label>
+            <label class="compact-label policy-time">Конец<input class="control edit-end" type="time" value="{{ p.time_end }}"></label>
+            <label class="switch-row policy-shift"><input type="checkbox" class="edit-shift" {% if p.requires_shift_active %}checked{% endif %}> Активная смена</label>
+            <div class="policy-actions">
+                <button class="button button-ghost save-policy" data-id="{{ p.id }}" title="Сохранить">✓</button>
+                <button class="button button-danger delete-policy" data-id="{{ p.id }}" title="Удалить">×</button>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('create-policy-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = event.submitter;
+        const formData = new FormData(event.currentTarget);
+        const data = Object.fromEntries(formData.entries());
+        data.role_id = Number(data.role_id);
+        data.building_id = Number(data.building_id);
+        data.requires_shift_active = formData.has('requires_shift_active');
+        button.disabled = true;
+        try {
+            await adminRequest('/api/admin/policies', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+            showAdminToast('Политика создана');
+            setTimeout(() => location.reload(), 350);
+        } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
+    });
+
+    document.querySelectorAll('.save-policy').forEach(button => button.addEventListener('click', async () => {
+        const card = button.closest('.policy-editor');
+        const data = {
+            role_id: Number(card.querySelector('.edit-role').value),
+            building_id: Number(card.querySelector('.edit-building').value),
+            days_allowed: card.querySelector('.edit-days').value.trim() || 'All',
+            time_start: card.querySelector('.edit-start').value,
+            time_end: card.querySelector('.edit-end').value,
+            requires_shift_active: card.querySelector('.edit-shift').checked
+        };
+        button.disabled = true;
+        try {
+            await adminRequest(`/api/admin/policies/${button.dataset.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+            showAdminToast('Политика обновлена');
+        } catch (error) { showAdminToast(error.message, 'error'); }
+        finally { button.disabled = false; }
+    }));
+
+    document.querySelectorAll('.delete-policy').forEach(button => button.addEventListener('click', async () => {
+        const card = button.closest('.policy-editor');
+        if (!confirm(`Удалить политику #${button.dataset.id}?`)) return;
+        button.disabled = true;
+        try {
+            await adminRequest(`/api/admin/policies/${button.dataset.id}`, { method:'DELETE' });
+            card.remove();
+            showAdminToast('Политика удалена');
+        } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
+    }));
+</script>
+{% endblock %}

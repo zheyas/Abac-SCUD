@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#07101d">
+    <title>СКУД — живая 3D-карта</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <main id="scene-root" aria-label="Интерактивная 3D-карта территории"></main>
+
+    <header class="topbar glass-panel">
+        <div class="brand-block">
+            <span class="brand-mark">A</span>
+            <div>
+                <div class="eyebrow">Система контроля доступа</div>
+                <div class="brand-title">Живая карта объекта</div>
+            </div>
+        </div>
+        <div class="session-block">
+            <div class="session-user">
+                <span class="status-dot" id="session-dot"></span>
+                <div>
+                    <div id="username">Гость</div>
+                    <div class="muted" id="role">Авторизация не выполнена</div>
+                </div>
+            </div>
+            <div class="shift-badge" id="shift-badge">
+                <span id="shift">Смена —</span>
+            </div>
+        </div>
+    </header>
+
+    <section class="time-panel glass-panel" aria-label="Управление временем">
+        <div class="time-heading">
+            <div>
+                <div class="eyebrow">Время региона</div>
+                <div id="datetime" class="clock">--:--:--</div>
+            </div>
+            <div id="day-phase" class="phase-pill">Определяем…</div>
+        </div>
+        <div class="date-row">
+            <span id="calendar-date">—</span>
+            <span class="separator">•</span>
+            <span id="region-name">Регион пользователя</span>
+        </div>
+        <div class="time-controls">
+            <button id="time-slower" class="icon-btn" title="Замедлить время" aria-label="Замедлить время">−</button>
+            <button id="time-play" class="play-btn" title="Пауза или продолжить" aria-label="Пауза или продолжить">Ⅱ</button>
+            <button id="time-faster" class="icon-btn" title="Ускорить время" aria-label="Ускорить время">＋</button>
+            <button id="time-live" class="live-btn" title="Вернуться к реальному времени"><span></span> Сейчас</button>
+        </div>
+        <div class="speed-row">
+            <span>Скорость симуляции</span>
+            <strong id="time-speed">×1</strong>
+        </div>
+        <div class="celestial-track">
+            <span class="track-moon">●</span>
+            <input id="time-scrubber" class="track-line" type="range" min="0" max="1439" step="1" aria-label="Время суток" title="Переместить время суток">
+            <span class="track-sun">●</span>
+        </div>
+    </section>
+
+    <aside class="access-panel glass-panel" aria-label="Доступ к зданиям">
+        <div class="panel-title-row">
+            <div>
+                <div class="eyebrow">Доступы в реальном времени</div>
+                <h2>Объекты</h2>
+            </div>
+            <div id="access-counter" class="counter">0 / 0</div>
+        </div>
+        <div class="legend">
+            <span><i class="legend-dot available"></i>Доступно</span>
+            <span><i class="legend-dot closed"></i>Не работает</span>
+            <span><i class="legend-dot denied"></i>Нет доступа</span>
+        </div>
+        <div id="building-status-list" class="building-status-list">
+            <div class="empty-state">Войдите, чтобы увидеть доступы</div>
+        </div>
+    </aside>
+
+    <section id="building-details" class="building-details glass-panel" aria-live="polite">
+        <button id="close-details" class="close-details" aria-label="Закрыть">×</button>
+        <div class="eyebrow">Выбранный объект</div>
+        <h2 id="details-name">—</h2>
+        <div id="details-status" class="details-status">—</div>
+        <div class="details-grid">
+            <span>Размер</span><strong id="details-size">—</strong>
+            <span>Режим работы</span><strong id="details-schedule">—</strong>
+            <span>Рабочие дни</span><strong id="details-days">—</strong>
+            <span>Тип доступа</span><strong id="details-type">—</strong>
+        </div>
+    </section>
+
+    <div class="bottom-dock glass-panel">
+        <div class="mouse-help">ЛКМ — вращение <span>•</span> ПКМ — панорама <span>•</span> Колесо — масштаб</div>
+        <div class="dock-actions">
+            <button id="toggle-shift-btn" class="dock-btn accent">Переключить смену</button>
+            <button id="admin-edit-btn" class="dock-btn" hidden>Редактировать</button>
+            <button id="add-building-btn" class="dock-btn" hidden>Добавить объект</button>
+        </div>
+    </div>
+
+    <div id="edit-mode-banner" class="edit-banner">Режим редактирования: выберите и перетащите здание</div>
+
+    <div id="building-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-header">
+            <div>
+                <div class="eyebrow">Параметры объекта</div>
+                <h2 id="modal-title">Редактирование здания</h2>
+            </div>
+            <button class="modal-close" id="close-modal" aria-label="Закрыть">×</button>
+        </div>
+        <label>Название<input type="text" id="edit-name"></label>
+        <label>Цвет объекта<input type="color" id="edit-color"></label>
+        <label>Ширина <output id="w-val"></output><input type="range" id="edit-w" min="30" max="300" step="5"></label>
+        <label>Высота <output id="h-val"></output><input type="range" id="edit-h" min="20" max="200" step="5"></label>
+        <label>Глубина <output id="d-val"></output><input type="range" id="edit-depth" min="10" max="100" step="5"></label>
+        <div class="schedule-fields">
+            <label>Рабочие дни<input type="text" id="edit-open-days" placeholder="All или Mon,Tue,Wed,Thu,Fri"></label>
+            <label>Открытие<input type="time" id="edit-open-time"></label>
+            <label>Закрытие<input type="time" id="edit-close-time"></label>
+        </div>
+        <label class="check-row"><input type="checkbox" id="edit-24-hours"><span>Работает круглосуточно</span></label>
+        <label class="check-row"><input type="checkbox" id="edit-all"><span>Доступен всем пользователям</span></label>
+        <div class="modal-actions">
+            <button id="delete-building-btn" class="danger-btn">Удалить</button>
+            <button id="save-building-changes" class="primary-btn">Сохранить</button>
+        </div>
+    </div>
+    <div id="modal-backdrop" class="modal-backdrop"></div>
+
+    <div id="login-overlay" class="login-overlay">
+        <form id="login-form" class="login-card">
+            <div class="login-symbol">A</div>
+            <div class="eyebrow">СКУД · ABAC</div>
+            <h1>Добро пожаловать</h1>
+            <p>Войдите, чтобы увидеть доступные объекты на живой карте.</p>
+            <label>Логин<input type="text" id="login-username" value="admin" autocomplete="username"></label>
+            <label>Пароль<input type="password" id="login-password" value="admin123" autocomplete="current-password"></label>
+            <button id="login-btn" type="submit">Открыть карту</button>
+            <div id="login-error" class="error-msg" role="alert"></div>
+            <div class="demo-note">admin/admin123 · worker/prod123<br>guard/guard123 · engineer/engineer123 · medic/medic123 · guest/guest123</div>
+        </form>
+    </div>
+
+    <div id="toast" class="toast" role="status"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
