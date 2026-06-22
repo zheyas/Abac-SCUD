@@ -38,6 +38,19 @@ class Database:
                 time_end TEXT DEFAULT '18:00', requires_shift_active BOOLEAN DEFAULT 1,
                 FOREIGN KEY(role_id) REFERENCES roles(id), FOREIGN KEY(building_id) REFERENCES buildings(id)
             );
+            CREATE TABLE IF NOT EXISTS access_events (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                building_id INTEGER NOT NULL,
+                attempted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                context_time TEXT NOT NULL,
+                result TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                rule_name TEXT,
+                source TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(building_id) REFERENCES buildings(id)
+            );
         """)
         # Неблокирующая миграция для баз, созданных предыдущей версией приложения.
         building_columns = {row[1] for row in conn.execute("PRAGMA table_info(buildings)").fetchall()}
@@ -50,6 +63,31 @@ class Database:
         for column, statement in migrations.items():
             if column not in building_columns:
                 conn.execute(statement)
+
+        user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        user_migrations = {
+            "shift_auto": "ALTER TABLE users ADD COLUMN shift_auto BOOLEAN DEFAULT 0",
+            "shift_days": "ALTER TABLE users ADD COLUMN shift_days TEXT DEFAULT 'Mon,Tue,Wed,Thu,Fri'",
+            "shift_start": "ALTER TABLE users ADD COLUMN shift_start TEXT DEFAULT '08:00'",
+            "shift_end": "ALTER TABLE users ADD COLUMN shift_end TEXT DEFAULT '18:00'",
+        }
+        for column, statement in user_migrations.items():
+            if column not in user_columns:
+                conn.execute(statement)
+
+        policy_columns = {row[1] for row in conn.execute("PRAGMA table_info(policies)").fetchall()}
+        policy_migrations = {
+            "user_id": "ALTER TABLE policies ADD COLUMN user_id INTEGER DEFAULT NULL",
+            "name": "ALTER TABLE policies ADD COLUMN name TEXT DEFAULT ''",
+            "effect": "ALTER TABLE policies ADD COLUMN effect TEXT DEFAULT 'allow'",
+            "is_active": "ALTER TABLE policies ADD COLUMN is_active BOOLEAN DEFAULT 1",
+        }
+        for column, statement in policy_migrations.items():
+            if column not in policy_columns:
+                conn.execute(statement)
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_access_events_time ON access_events(attempted_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_policies_user_building ON policies(user_id, building_id)")
         conn.commit()
         conn.close()
 
@@ -106,6 +144,20 @@ class Database:
                     (username, password_hash, roles[role_name], shift_status)
                 )
 
+        auto_shift_version = conn.execute("SELECT value FROM app_meta WHERE key='auto_shift_version'").fetchone()
+        if not auto_shift_version:
+            auto_schedules = {
+                "worker": ("Mon,Tue,Wed,Thu,Fri", "07:00", "19:00"),
+                "guard": ("All", "00:00", "23:59"),
+                "engineer": ("Mon,Tue,Wed,Thu,Fri,Sat", "07:00", "21:00"),
+            }
+            for username, (days, start, end) in auto_schedules.items():
+                conn.execute(
+                    "UPDATE users SET shift_auto=1, shift_days=?, shift_start=?, shift_end=? WHERE username=?",
+                    (days, start, end, username)
+                )
+            conn.execute("INSERT INTO app_meta (key, value) VALUES ('auto_shift_version', '1')")
+
         buildings = {row["name"]: row["id"] for row in conn.execute("SELECT id, name FROM buildings")}
         policy_specs = [
             ("Администратор", "Администрация", "All", "00:00", "23:59", False),
@@ -143,5 +195,13 @@ class Database:
                     "INSERT INTO policies (role_id, building_id, days_allowed, time_start, time_end, requires_shift_active) VALUES (?,?,?,?,?,?)",
                     values
                 )
+        conn.execute(
+            """UPDATE policies
+               SET name = CASE
+                   WHEN name IS NULL OR name = '' THEN 'Доступ: ' ||
+                       COALESCE((SELECT name FROM roles WHERE roles.id = policies.role_id), 'Роль') ||
+                       ' → ' || COALESCE((SELECT name FROM buildings WHERE buildings.id = policies.building_id), 'Объект')
+                   ELSE name END"""
+        )
         conn.commit()
         conn.close()

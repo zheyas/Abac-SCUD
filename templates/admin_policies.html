@@ -1,46 +1,61 @@
 {% extends "admin_base.html" %}
-{% block title %}Политики — СКУД{% endblock %}
+{% block title %}Правила доступа — СКУД{% endblock %}
 {% block content %}
 <header class="page-header">
     <div>
-        <div class="page-kicker">ABAC · Правила</div>
-        <h1>Политики доступа</h1>
-        <p>Свяжите роль со зданием и задайте допустимые дни, часы и требование активной смены.</p>
+        <div class="page-kicker">Понятные правила</div>
+        <h1>Правила доступа</h1>
+        <p>Правило назначается роли или конкретному пользователю. Персональное правило при совпадении имеет приоритет над ролевым.</p>
     </div>
-    <div class="page-count"><strong>{{ policies|length }}</strong><span>политик</span></div>
+    <div class="page-count"><strong>{{ policies|length }}</strong><span>правил</span></div>
 </header>
 
 <section class="admin-card">
     <div class="card-heading">
-        <div><h2>Новое правило</h2><p>Правило начнёт участвовать в расчёте доступа сразу после создания.</p></div>
-        <span class="section-badge">ABAC</span>
+        <div><h2>Новое правило</h2><p>Назовите правило человеческим языком и выберите, кому оно назначено.</p></div>
+        <span class="section-badge">Доступ</span>
     </div>
-    <form id="create-policy-form" class="form-grid">
-        <label class="field span-2"><span>Роль</span><select class="control" name="role_id" required>{% for role in roles %}<option value="{{ role.id }}">{{ role.name }}</option>{% endfor %}</select></label>
-        <label class="field span-2"><span>Здание</span><select class="control" name="building_id" required>{% for b in buildings %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}</select></label>
-        <label class="field span-3"><span>Разрешённые дни</span><input class="control" name="days_allowed" value="Mon,Tue,Wed,Thu,Fri" placeholder="All или Mon,Tue..."></label>
+    <form id="create-policy-form" class="form-grid target-scope">
+        <label class="field span-4"><span>Название правила</span><input class="control" name="name" placeholder="Например: Ивану доступ в производство" required></label>
+        <label class="field span-2"><span>Назначить</span><select class="control target-type" name="target_type"><option value="role">Роли</option><option value="user">Пользователю</option></select></label>
+        <label class="field span-3 target-select role-target"><span>Роль</span><select class="control">{% for role in roles %}<option value="{{ role.id }}">{{ role.name }}</option>{% endfor %}</select></label>
+        <label class="field span-3 target-select user-target" hidden><span>Пользователь</span><select class="control">{% for user in users %}<option value="{{ user.id }}">{{ user.username }}</option>{% endfor %}</select></label>
+        <label class="field span-3"><span>Здание</span><select class="control" name="building_id">{% for b in buildings %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}</select></label>
+        <label class="field span-2"><span>Решение</span><select class="control" name="effect"><option value="allow">Разрешить</option><option value="deny">Запретить</option></select></label>
+        <label class="field span-3"><span>Дни</span><input class="control" name="days_allowed" value="Mon,Tue,Wed,Thu,Fri" placeholder="All или Mon,Tue..."></label>
         <label class="field span-2"><span>С</span><input class="control" type="time" name="time_start" value="09:00"></label>
         <label class="field span-2"><span>До</span><input class="control" type="time" name="time_end" value="18:00"></label>
         <label class="switch-row span-2"><input type="checkbox" name="requires_shift_active"> Нужна активная смена</label>
+        <label class="switch-row span-2"><input type="checkbox" name="is_active" checked> Правило включено</label>
         <button class="button button-primary span-2" type="submit"><span>＋</span> Создать правило</button>
     </form>
 </section>
 
 <section>
-    <div class="card-heading"><div><h2>Все правила</h2><p>Компактный список с редактированием на месте.</p></div></div>
-    <div class="policy-list">
+    <div class="card-heading"><div><h2>Все правила</h2><p>Красные запрещают, зелёные разрешают. Отключённые правила не участвуют в расчёте.</p></div></div>
+    <div class="rule-list">
         {% for p in policies %}
-        <article class="policy-card policy-editor" data-id="{{ p.id }}">
-            <span class="policy-number">#{{ p.id }}</span>
-            <label class="compact-label">Роль<select class="control edit-role">{% for role in roles %}<option value="{{ role.id }}" {% if role.id == p.role_id %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select></label>
-            <label class="compact-label">Здание<select class="control edit-building">{% for b in buildings %}<option value="{{ b.id }}" {% if b.id == p.building_id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}</select></label>
-            <label class="compact-label policy-days">Дни<input class="control edit-days" value="{{ p.days_allowed }}"></label>
-            <label class="compact-label policy-time">Начало<input class="control edit-start" type="time" value="{{ p.time_start }}"></label>
-            <label class="compact-label policy-time">Конец<input class="control edit-end" type="time" value="{{ p.time_end }}"></label>
-            <label class="switch-row policy-shift"><input type="checkbox" class="edit-shift" {% if p.requires_shift_active %}checked{% endif %}> Активная смена</label>
-            <div class="policy-actions">
-                <button class="button button-ghost save-policy" data-id="{{ p.id }}" title="Сохранить">✓</button>
-                <button class="button button-danger delete-policy" data-id="{{ p.id }}" title="Удалить">×</button>
+        <article class="rule-card rule-editor {{ p.effect or 'allow' }} target-scope" data-id="{{ p.id }}">
+            <div class="rule-head">
+                <span class="entity-id">#{{ p.id }}</span>
+                <input class="control rule-name edit-name" value="{{ p.name or ('Правило #' ~ p.id) }}" aria-label="Название правила {{ p.id }}">
+                <span class="rule-badge {{ p.effect or 'allow' }}">{% if p.effect == 'deny' %}Запрет{% else %}Разрешение{% endif %}</span>
+                <div class="rule-actions">
+                    <button class="button button-ghost save-policy" data-id="{{ p.id }}" title="Сохранить">✓</button>
+                    <button class="button button-danger delete-policy" data-id="{{ p.id }}" title="Удалить">×</button>
+                </div>
+            </div>
+            <div class="rule-body">
+                <label class="compact-label">Назначено<select class="control edit-target-type target-type"><option value="role" {% if not p.user_id %}selected{% endif %}>Роли</option><option value="user" {% if p.user_id %}selected{% endif %}>Пользователю</option></select></label>
+                <label class="compact-label target-select role-target" {% if p.user_id %}hidden{% endif %}>Роль<select class="control edit-role">{% for role in roles %}<option value="{{ role.id }}" {% if role.id == p.role_id %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select></label>
+                <label class="compact-label target-select user-target" {% if not p.user_id %}hidden{% endif %}>Пользователь<select class="control edit-user">{% for user in users %}<option value="{{ user.id }}" {% if user.id == p.user_id %}selected{% endif %}>{{ user.username }}</option>{% endfor %}</select></label>
+                <label class="compact-label">Здание<select class="control edit-building">{% for b in buildings %}<option value="{{ b.id }}" {% if b.id == p.building_id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}</select></label>
+                <label class="compact-label">Решение<select class="control edit-effect"><option value="allow" {% if p.effect != 'deny' %}selected{% endif %}>Разрешить</option><option value="deny" {% if p.effect == 'deny' %}selected{% endif %}>Запретить</option></select></label>
+                <label class="compact-label">Дни<input class="control edit-days" value="{{ p.days_allowed }}"></label>
+                <label class="compact-label">Начало<input class="control edit-start" type="time" value="{{ p.time_start }}"></label>
+                <label class="compact-label">Конец<input class="control edit-end" type="time" value="{{ p.time_end }}"></label>
+                <label class="switch-row"><input type="checkbox" class="edit-shift" {% if p.requires_shift_active %}checked{% endif %}> Нужна смена</label>
+                <label class="switch-row"><input type="checkbox" class="edit-active" {% if p.is_active %}checked{% endif %}> Включено</label>
             </div>
         </article>
         {% endfor %}
@@ -50,48 +65,63 @@
 
 {% block scripts %}
 <script>
-    document.getElementById('create-policy-form').addEventListener('submit', async (event) => {
+    function syncTarget(scope) {
+        const isUser = scope.querySelector('.target-type').value === 'user';
+        scope.querySelector('.role-target').hidden = isUser;
+        scope.querySelector('.user-target').hidden = !isUser;
+    }
+    document.querySelectorAll('.target-scope').forEach(scope => {
+        syncTarget(scope);
+        scope.querySelector('.target-type').addEventListener('change', () => syncTarget(scope));
+    });
+    function policyPayload(scope) {
+        const targetType = scope.querySelector('.target-type').value;
+        return {
+            name: scope.querySelector('.edit-name')?.value.trim() || scope.querySelector('[name="name"]')?.value.trim(),
+            target_type: targetType,
+            target_id: Number(scope.querySelector(targetType === 'user' ? '.user-target select' : '.role-target select').value),
+            building_id: Number(scope.querySelector('.edit-building')?.value || scope.querySelector('[name="building_id"]').value),
+            effect: scope.querySelector('.edit-effect')?.value || scope.querySelector('[name="effect"]').value,
+            days_allowed: (scope.querySelector('.edit-days')?.value || scope.querySelector('[name="days_allowed"]').value).trim() || 'All',
+            time_start: scope.querySelector('.edit-start')?.value || scope.querySelector('[name="time_start"]').value,
+            time_end: scope.querySelector('.edit-end')?.value || scope.querySelector('[name="time_end"]').value,
+            requires_shift_active: (scope.querySelector('.edit-shift') || scope.querySelector('[name="requires_shift_active"]')).checked,
+            is_active: (scope.querySelector('.edit-active') || scope.querySelector('[name="is_active"]')).checked
+        };
+    }
+    document.getElementById('create-policy-form').addEventListener('submit', async event => {
         event.preventDefault();
         const button = event.submitter;
-        const formData = new FormData(event.currentTarget);
-        const data = Object.fromEntries(formData.entries());
-        data.role_id = Number(data.role_id);
-        data.building_id = Number(data.building_id);
-        data.requires_shift_active = formData.has('requires_shift_active');
         button.disabled = true;
         try {
-            await adminRequest('/api/admin/policies', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-            showAdminToast('Политика создана');
+            await adminRequest('/api/admin/policies', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(policyPayload(event.currentTarget))});
+            showAdminToast('Правило создано');
             setTimeout(() => location.reload(), 350);
         } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
     });
-
     document.querySelectorAll('.save-policy').forEach(button => button.addEventListener('click', async () => {
-        const card = button.closest('.policy-editor');
-        const data = {
-            role_id: Number(card.querySelector('.edit-role').value),
-            building_id: Number(card.querySelector('.edit-building').value),
-            days_allowed: card.querySelector('.edit-days').value.trim() || 'All',
-            time_start: card.querySelector('.edit-start').value,
-            time_end: card.querySelector('.edit-end').value,
-            requires_shift_active: card.querySelector('.edit-shift').checked
-        };
+        const card = button.closest('.rule-editor');
         button.disabled = true;
         try {
-            await adminRequest(`/api/admin/policies/${button.dataset.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-            showAdminToast('Политика обновлена');
+            const data = policyPayload(card);
+            await adminRequest(`/api/admin/policies/${button.dataset.id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+            card.classList.toggle('allow', data.effect === 'allow');
+            card.classList.toggle('deny', data.effect === 'deny');
+            const badge = card.querySelector('.rule-badge');
+            badge.className = `rule-badge ${data.effect}`;
+            badge.textContent = data.effect === 'deny' ? 'Запрет' : 'Разрешение';
+            showAdminToast('Правило обновлено');
         } catch (error) { showAdminToast(error.message, 'error'); }
         finally { button.disabled = false; }
     }));
-
     document.querySelectorAll('.delete-policy').forEach(button => button.addEventListener('click', async () => {
-        const card = button.closest('.policy-editor');
-        if (!confirm(`Удалить политику #${button.dataset.id}?`)) return;
+        const card = button.closest('.rule-editor');
+        if (!confirm(`Удалить правило «${card.querySelector('.edit-name').value}»?`)) return;
         button.disabled = true;
         try {
-            await adminRequest(`/api/admin/policies/${button.dataset.id}`, { method:'DELETE' });
+            await adminRequest(`/api/admin/policies/${button.dataset.id}`, {method:'DELETE'});
             card.remove();
-            showAdminToast('Политика удалена');
+            showAdminToast('Правило удалено');
         } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
     }));
 </script>
