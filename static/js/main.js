@@ -5,6 +5,12 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 const SITE_CENTER = new THREE.Vector3(450, 0, 290);
 const SPEEDS = [0.25, 1, 5, 30, 120, 600];
+const ROAD_SPECS = [
+    { w: 900, d: 52, x: 450, z: 305 },
+    { w: 52, d: 680, x: 435, z: 305 },
+    { w: 580, d: 36, x: 520, z: 95 },
+    { w: 520, d: 36, x: 500, z: 500 }
+];
 const STATUS = {
     available: { color: 0x52e6a5, css: '#52e6a5', title: 'Доступно' },
     closed: { color: 0xf5b95f, css: '#f5b95f', title: 'Не работает' },
@@ -33,6 +39,16 @@ let accessRequestPending = false;
 let lastAccessUpdate = 0;
 let lastAccessMinute = '';
 let toastTimer;
+let entryResultTimer;
+let entryMarker = null;
+let entryAnimation = null;
+let weatherParticles = null;
+let weatherClouds = null;
+let weatherLastFrame = performance.now();
+let weatherState = {
+    available: false, cloudCover: 0, precipitation: 0, rain: 0, snowfall: 0,
+    windSpeed: 0, windDirection: 0, weatherCode: 0, temperature: null
+};
 
 const timeState = {
     anchorReal: performance.now(),
@@ -182,6 +198,7 @@ function initScene() {
 
     createEnvironment();
     createCelestialBodies();
+    createWeatherSystem();
 
     renderer.domElement.addEventListener('click', onSceneClick);
     renderer.domElement.addEventListener('dblclick', onSceneDoubleClick);
@@ -200,13 +217,7 @@ function createEnvironment() {
     scene.add(ground);
 
     const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x56606a, roughness: 0.96 });
-    const roads = [
-        [900, 52, 450, 305],
-        [52, 680, 435, 305],
-        [580, 36, 520, 95],
-        [520, 36, 500, 500]
-    ];
-    roads.forEach(([w, d, x, z]) => {
+    ROAD_SPECS.forEach(({ w, d, x, z }) => {
         const road = new THREE.Mesh(new THREE.BoxGeometry(w, 1.5, d), roadMaterial);
         road.position.set(x, -0.9, z);
         road.receiveShadow = true;
@@ -222,17 +233,26 @@ function createEnvironment() {
 
     const treePositions = [
         [92, 110], [135, 155], [105, 235], [70, 390], [125, 475],
-        [270, 570], [340, 560], [420, 585], [560, 570], [710, 555],
-        [875, 490], [920, 420], [930, 250], [900, 145], [810, 80],
-        [610, 72], [430, 70], [260, 82]
+        [270, 570], [340, 560], [380, 590], [560, 570], [710, 555],
+        [875, 490], [920, 420], [930, 250], [900, 145], [850, 70],
+        [610, 45], [390, 55], [190, 82]
     ];
-    treePositions.forEach(([x, z], index) => scene.add(createTree(x, z, 0.85 + (index % 4) * 0.08)));
+    treePositions
+        .filter(([x, z]) => !isPointOnRoad(x, z))
+        .forEach(([x, z], index) => scene.add(createTree(x, z, 0.85 + (index % 4) * 0.08)));
 
     const grid = new THREE.GridHelper(1200, 24, 0x55705f, 0x55705f);
     grid.position.set(450, -0.6, 300);
     grid.material.transparent = true;
     grid.material.opacity = 0.08;
     scene.add(grid);
+}
+
+function isPointOnRoad(x, z, margin = 16) {
+    return ROAD_SPECS.some(road =>
+        Math.abs(x - road.x) <= road.w / 2 + margin &&
+        Math.abs(z - road.z) <= road.d / 2 + margin
+    );
 }
 
 function createGroundTexture() {
@@ -308,6 +328,136 @@ function createCelestialBodies() {
         color: 0xdbe8ff, size: 2.4, transparent: true, opacity: 0, depthWrite: false, fog: false
     }));
     scene.add(stars, sunMesh, moonMesh);
+}
+
+function createWeatherSystem() {
+    const count = 900;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) resetWeatherParticle(positions, i, true);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.PointsMaterial({
+        color: 0x9fd5ff, size: 2.2, transparent: true, opacity: .78,
+        depthWrite: false, sizeAttenuation: true
+    });
+    weatherParticles = new THREE.Points(geometry, material);
+    weatherParticles.visible = false;
+    scene.add(weatherParticles);
+
+    weatherClouds = new THREE.Group();
+    const cloudMaterial = new THREE.MeshLambertMaterial({
+        color: 0xc7d0d8, transparent: true, opacity: 0, depthWrite: false
+    });
+    for (let clusterIndex = 0; clusterIndex < 9; clusterIndex += 1) {
+        const cluster = new THREE.Group();
+        for (let puff = 0; puff < 5; puff += 1) {
+            const cloud = new THREE.Mesh(new THREE.SphereGeometry(35 + Math.random() * 30, 12, 10), cloudMaterial);
+            cloud.scale.y = .35 + Math.random() * .2;
+            cloud.position.set((puff - 2) * 38, Math.random() * 12, Math.random() * 32 - 16);
+            cluster.add(cloud);
+        }
+        cluster.position.set(
+            SITE_CENTER.x - 520 + Math.random() * 1040,
+            330 + Math.random() * 120,
+            SITE_CENTER.z - 420 + Math.random() * 840
+        );
+        cluster.userData.material = cloudMaterial;
+        weatherClouds.add(cluster);
+    }
+    weatherClouds.userData.material = cloudMaterial;
+    scene.add(weatherClouds);
+}
+
+function resetWeatherParticle(positions, index, randomHeight = false) {
+    const offset = index * 3;
+    positions[offset] = SITE_CENTER.x - 560 + Math.random() * 1120;
+    positions[offset + 1] = randomHeight ? 20 + Math.random() * 430 : 390 + Math.random() * 80;
+    positions[offset + 2] = SITE_CENTER.z - 500 + Math.random() * 1000;
+}
+
+function weatherCodeInfo(code) {
+    if (code === 0) return { icon: '☀', label: 'Ясно' };
+    if ([1, 2].includes(code)) return { icon: '◑', label: 'Переменная облачность' };
+    if (code === 3) return { icon: '☁', label: 'Пасмурно' };
+    if ([45, 48].includes(code)) return { icon: '≋', label: 'Туман' };
+    if ([51, 53, 55, 56, 57].includes(code)) return { icon: '☂', label: 'Морось' };
+    if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return { icon: '☂', label: 'Дождь' };
+    if ([71, 73, 75, 77, 85, 86].includes(code)) return { icon: '❄', label: 'Снег' };
+    if ([95, 96, 99].includes(code)) return { icon: 'ϟ', label: 'Гроза' };
+    return { icon: '◌', label: 'Погода' };
+}
+
+async function loadWeather() {
+    const row = document.getElementById('weather-row');
+    try {
+        const response = await fetch(`/api/weather?latitude=${encodeURIComponent(region.latitude)}&longitude=${encodeURIComponent(region.longitude)}`);
+        const payload = await response.json();
+        if (!response.ok || !payload.available) throw new Error(payload.error || 'Нет данных');
+        const current = payload.current || {};
+        weatherState = {
+            available: true,
+            cloudCover: Number(current.cloud_cover || 0),
+            precipitation: Number(current.precipitation || 0),
+            rain: Number(current.rain || 0),
+            snowfall: Number(current.snowfall || 0),
+            windSpeed: Number(current.wind_speed_10m || 0),
+            windDirection: Number(current.wind_direction_10m || 0),
+            weatherCode: Number(current.weather_code || 0),
+            temperature: Number(current.temperature_2m)
+        };
+        const info = weatherCodeInfo(weatherState.weatherCode);
+        document.getElementById('weather-icon').textContent = info.icon;
+        document.getElementById('weather-temp').textContent = `${Math.round(weatherState.temperature)} °C`;
+        document.getElementById('weather-description').textContent = `${info.label} · облачность ${Math.round(weatherState.cloudCover)}%`;
+        document.getElementById('weather-wind').textContent = `${Math.round(weatherState.windSpeed)} км/ч`;
+        row.classList.remove('unavailable');
+        applyWeatherVisibility();
+    } catch (_) {
+        weatherState.available = false;
+        document.getElementById('weather-icon').textContent = '◌';
+        document.getElementById('weather-temp').textContent = 'Нет данных';
+        document.getElementById('weather-description').textContent = 'Сцена работает в ясном режиме';
+        document.getElementById('weather-wind').textContent = '—';
+        row.classList.add('unavailable');
+        applyWeatherVisibility();
+    }
+}
+
+function applyWeatherVisibility() {
+    if (!weatherParticles || !weatherClouds) return;
+    const snowing = weatherState.snowfall > 0 || [71, 73, 75, 77, 85, 86].includes(weatherState.weatherCode);
+    const raining = weatherState.rain > 0 || [51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99].includes(weatherState.weatherCode);
+    weatherParticles.visible = weatherState.available && (snowing || raining);
+    weatherParticles.userData.snowing = snowing;
+    weatherParticles.material.color.set(snowing ? 0xf1f6ff : 0x8fcfff);
+    weatherParticles.material.size = snowing ? 4.2 : 2.0;
+    weatherParticles.material.opacity = snowing ? .88 : .72;
+    weatherClouds.userData.material.opacity = weatherState.available ? .08 + weatherState.cloudCover / 100 * .34 : 0;
+}
+
+function updateWeatherEffects(now) {
+    if (!weatherParticles || !weatherClouds) return;
+    const delta = Math.min(.05, (now - weatherLastFrame) / 1000);
+    weatherLastFrame = now;
+    const windRadians = THREE.MathUtils.degToRad(weatherState.windDirection);
+    const windX = Math.sin(windRadians) * weatherState.windSpeed * .32;
+    const windZ = Math.cos(windRadians) * weatherState.windSpeed * .32;
+    weatherClouds.position.x += windX * delta * .15;
+    weatherClouds.position.z += windZ * delta * .15;
+    if (Math.abs(weatherClouds.position.x) > 300) weatherClouds.position.x = 0;
+    if (Math.abs(weatherClouds.position.z) > 260) weatherClouds.position.z = 0;
+    if (!weatherParticles.visible) return;
+    const positions = weatherParticles.geometry.attributes.position.array;
+    const snowing = weatherParticles.userData.snowing;
+    const fallSpeed = snowing ? 35 : 185;
+    for (let i = 0; i < positions.length / 3; i += 1) {
+        const offset = i * 3;
+        positions[offset] += windX * delta + (snowing ? Math.sin(now * .001 + i) * delta * 3 : 0);
+        positions[offset + 1] -= fallSpeed * delta;
+        positions[offset + 2] += windZ * delta;
+        if (positions[offset + 1] < 1) resetWeatherParticle(positions, i, false);
+    }
+    weatherParticles.geometry.attributes.position.needsUpdate = true;
 }
 
 function createBuildingMesh(building) {
@@ -450,8 +600,10 @@ async function updateAccessColors(force = false) {
             })
         });
         if (!response.ok) throw new Error('Ошибка проверки доступа');
-        const statuses = await response.json();
+        const payload = await response.json();
+        const statuses = payload.buildings || payload;
         buildingsMeshes.forEach(item => setBuildingStatus(item, statuses[item.data.id]));
+        if (payload.user) applyShiftState(payload.user);
         renderStatusList();
         if (selectedItem) showBuildingDetails(selectedItem);
     } catch (error) {
@@ -517,6 +669,7 @@ function showBuildingDetails(item) {
     document.getElementById('details-schedule').textContent = formatBuildingSchedule(item.data);
     document.getElementById('details-days').textContent = formatBuildingDays(item.data.open_days);
     document.getElementById('details-type').textContent = item.data.is_accessible_to_all ? 'Общий' : 'По политике ABAC';
+    document.getElementById('attempt-entry-btn').disabled = false;
     panel.classList.add('visible');
 }
 
@@ -565,20 +718,31 @@ async function refreshUserInfo() {
     const response = await fetch('/api/user_status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: currentUser.id })
+        body: JSON.stringify({ user_id: currentUser.id, timestamp: localIsoString(getSimulationDate()) })
     });
     if (!response.ok) return;
     const data = await response.json();
-    currentUser.shift_status = data.shift_status;
     document.getElementById('username').textContent = currentUser.username;
-    document.getElementById('role').textContent = currentUser.role_name;
+    document.getElementById('group').textContent = `Группа: ${currentUser.group_name || currentUser.role_name}`;
     document.getElementById('session-dot').classList.add('online');
+    applyShiftState(data);
+    await updateAccessColors(true);
+}
+
+function applyShiftState(data) {
+    currentUser.shift_status = data.shift_status;
+    currentUser.shift_auto = Boolean(data.shift_auto);
     const shiftBadge = document.getElementById('shift-badge');
     const active = currentUser.shift_status === 'active';
     shiftBadge.classList.toggle('active', active);
-    document.getElementById('shift').textContent = active ? 'Смена активна' : 'Смена неактивна';
-    document.getElementById('toggle-shift-btn').textContent = active ? 'Завершить смену' : 'Начать смену';
-    await updateAccessColors(true);
+    document.getElementById('shift').textContent = currentUser.shift_auto
+        ? `Автосмена ${active ? 'активна' : 'неактивна'}`
+        : active ? 'Смена активна' : 'Смена неактивна';
+    const button = document.getElementById('toggle-shift-btn');
+    button.disabled = currentUser.shift_auto;
+    button.textContent = currentUser.shift_auto ? 'Смена по расписанию' : active ? 'Завершить смену' : 'Начать смену';
+    button.title = currentUser.shift_auto
+        ? `${formatBuildingDays(data.shift_days)} · ${data.shift_start}–${data.shift_end}` : '';
 }
 
 async function toggleShift() {
@@ -591,10 +755,131 @@ async function toggleShift() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: currentUser.id })
     });
+    const data = await response.json();
     if (response.ok) {
         await refreshUserInfo();
         showToast('Статус смены обновлён');
+    } else {
+        showToast(data.error || 'Не удалось изменить смену');
     }
+}
+
+async function attemptEntry() {
+    if (!selectedItem || !currentUser) return;
+    const button = document.getElementById('attempt-entry-btn');
+    button.disabled = true;
+    button.textContent = 'Проверяем доступ…';
+    try {
+        const response = await fetch('/api/entry_attempt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                building_id: selectedItem.data.id,
+                timestamp: localIsoString(getSimulationDate())
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Не удалось проверить вход');
+        startEntryAnimation(selectedItem, result);
+        showEntryResult(result);
+        await loadEntryHistory();
+    } catch (error) {
+        showToast(error.message);
+    } finally {
+        button.disabled = false;
+        button.innerHTML = '<span>→</span> Попытаться войти';
+    }
+}
+
+function ensureEntryMarker() {
+    if (entryMarker) return entryMarker;
+    entryMarker = new THREE.Group();
+    const body = new THREE.Mesh(
+        THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(3, 7, 4, 8) : new THREE.CylinderGeometry(3, 3, 10, 10),
+        new THREE.MeshStandardMaterial({ color: 0xe9f1fb, emissive: 0x36506e, emissiveIntensity: .22 })
+    );
+    body.position.y = 8;
+    body.castShadow = true;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(3.2, 12, 12), body.material);
+    head.position.y = 16;
+    head.castShadow = true;
+    const aura = new THREE.Mesh(
+        new THREE.RingGeometry(5, 7, 32),
+        new THREE.MeshBasicMaterial({ color: STATUS.unknown.color, transparent: true, opacity: .8, side: THREE.DoubleSide })
+    );
+    aura.rotation.x = -Math.PI / 2;
+    aura.position.y = .3;
+    entryMarker.add(body, head, aura);
+    entryMarker.userData.aura = aura;
+    entryMarker.visible = false;
+    scene.add(entryMarker);
+    return entryMarker;
+}
+
+function startEntryAnimation(item, result) {
+    const marker = ensureEntryMarker();
+    const start = new THREE.Vector3(item.mesh.position.x, 0, item.mesh.position.z + item.data.depth / 2 + 70);
+    const end = new THREE.Vector3(item.mesh.position.x, 0, item.mesh.position.z + item.data.depth / 2 + 7);
+    marker.position.copy(start);
+    marker.visible = true;
+    marker.userData.aura.material.color.setHex(result.access ? STATUS.available.color : STATUS.denied.color);
+    entryAnimation = { marker, start, end, result, startedAt: performance.now(), duration: 1450 };
+}
+
+function updateEntryAnimation(now) {
+    if (!entryAnimation) return;
+    const { marker, start, end, result, startedAt, duration } = entryAnimation;
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const travel = Math.min(1, progress / .72);
+    const eased = 1 - Math.pow(1 - travel, 3);
+    marker.position.lerpVectors(start, end, eased);
+    marker.userData.aura.scale.setScalar(1 + Math.sin(progress * Math.PI * 8) * .08);
+    if (!result.access && progress > .72) {
+        marker.position.z += Math.sin((progress - .72) / .28 * Math.PI) * 10;
+    }
+    if (result.access && progress > .72) marker.position.z -= (progress - .72) * 35;
+    if (progress >= 1) {
+        marker.visible = false;
+        entryAnimation = null;
+    }
+}
+
+function showEntryResult(result) {
+    const panel = document.getElementById('entry-result');
+    const granted = Boolean(result.access);
+    panel.className = `entry-result visible ${granted ? 'granted' : 'denied'}`;
+    document.getElementById('entry-result-icon').textContent = granted ? '✓' : '×';
+    document.getElementById('entry-result-title').textContent = granted ? `Вход в «${result.building_name}» разрешён` : `Отказ: «${result.building_name}»`;
+    document.getElementById('entry-result-reason').textContent = result.rule_name ? `${result.reason} · ${result.rule_name}` : result.reason;
+    clearTimeout(entryResultTimer);
+    entryResultTimer = setTimeout(() => panel.classList.remove('visible'), 3200);
+}
+
+async function loadEntryHistory() {
+    if (!currentUser) return;
+    try {
+        const response = await fetch('/api/access_events?limit=5');
+        if (!response.ok) return;
+        renderEntryHistory(await response.json());
+    } catch (_) {}
+}
+
+function renderEntryHistory(events) {
+    const container = document.getElementById('entry-history-list');
+    if (!events.length) {
+        container.innerHTML = '<div class="entry-history-empty">Событий пока нет</div>';
+        return;
+    }
+    container.replaceChildren(...events.map(event => {
+        const row = document.createElement('div');
+        row.className = `entry-event ${event.result}`;
+        const time = new Date(event.context_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        row.innerHTML = '<i class="entry-event-dot"></i><span class="entry-event-main"><strong></strong><span></span></span><time></time>';
+        row.querySelector('strong').textContent = event.building_name;
+        row.querySelector('.entry-event-main span').textContent = event.result === 'granted' ? 'Вход разрешён' : event.reason;
+        row.querySelector('time').textContent = time;
+        return row;
+    }));
 }
 
 async function login(username, password) {
@@ -613,9 +898,10 @@ async function login(username, password) {
         currentUser = data.user;
         await loadBuildings();
         await refreshUserInfo();
+        await loadEntryHistory();
         document.getElementById('login-overlay').classList.add('hidden');
-        document.getElementById('toggle-shift-btn').disabled = false;
-        if (currentUser.role_id === 1) {
+        document.getElementById('toggle-shift-btn').disabled = Boolean(currentUser.shift_auto);
+        if ((currentUser.group_id || currentUser.role_id) === 1) {
             document.getElementById('admin-edit-btn').hidden = false;
             document.getElementById('add-building-btn').hidden = false;
         }
@@ -857,8 +1143,12 @@ function updateSky(date) {
         ? nightColor.clone().lerp(dawnColor, THREE.MathUtils.smoothstep(altitudeDeg, -12, 1))
         : dawnColor.clone().lerp(dayColor, THREE.MathUtils.smoothstep(altitudeDeg, 0, 28));
     if (horizonFactor > .55 && altitudeDeg > -6 && altitudeDeg < 16) skyColor.lerp(new THREE.Color(0xd98a68), .14);
+    const cloudFactor = weatherState.available ? THREE.MathUtils.clamp(weatherState.cloudCover / 100, 0, 1) : 0;
+    const precipitationFactor = weatherState.available ? THREE.MathUtils.clamp(weatherState.precipitation / 2, 0, 1) : 0;
+    skyColor.lerp(new THREE.Color(dayFactor > .2 ? 0x687985 : 0x182431), cloudFactor * .48);
     scene.background.copy(skyColor);
     scene.fog.color.copy(skyColor);
+    scene.fog.density = .00055 + cloudFactor * .00012 + precipitationFactor * .00036;
 
     const celestialRadius = 720;
     sunMesh.position.copy(SITE_CENTER).addScaledVector(direction, celestialRadius);
@@ -867,15 +1157,15 @@ function updateSky(date) {
     moonMesh.visible = altitudeDeg < 18;
 
     sunLight.position.copy(SITE_CENTER).addScaledVector(direction, 850);
-    sunLight.intensity = Math.max(0, dayFactor * 1.28);
+    sunLight.intensity = Math.max(0, dayFactor * 1.28 * (1 - cloudFactor * .68));
     sunLight.color.set(altitudeDeg < 10 ? 0xffb36f : 0xfff0d5);
     moonLight.position.copy(SITE_CENTER).addScaledVector(direction, -700);
     moonLight.intensity = (1 - dayFactor) * .22;
-    ambientLight.intensity = .1 + dayFactor * .3;
+    ambientLight.intensity = .1 + dayFactor * .3 + cloudFactor * .04;
     ambientLight.color.set(dayFactor > .4 ? 0xa8bfd5 : 0x53647d);
-    hemisphereLight.intensity = .14 + dayFactor * .36;
+    hemisphereLight.intensity = .14 + dayFactor * .36 * (1 - cloudFactor * .32);
     stars.material.opacity = Math.pow(1 - dayFactor, 2) * .92;
-    renderer.toneMappingExposure = .72 + dayFactor * .25;
+    renderer.toneMappingExposure = .72 + dayFactor * .25 - cloudFactor * .11;
 
     const localHour = hourOf(date);
     const phase = altitudeDeg < -7 || localHour < 4 || localHour >= 23 ? 'Ночь'
@@ -917,6 +1207,8 @@ function animate(now = performance.now()) {
     controls.update();
     const date = getSimulationDate(now);
     updateSky(date);
+    updateWeatherEffects(now);
+    updateEntryAnimation(now);
     if (now - lastUiFrame > 90) {
         updateDateTime(date);
         const minuteKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}-${date.getMinutes()}`;
@@ -939,6 +1231,8 @@ function bindInterface() {
     document.getElementById('admin-edit-btn').addEventListener('click', toggleEditMode);
     document.getElementById('add-building-btn').addEventListener('click', createBuilding);
     document.getElementById('close-details').addEventListener('click', () => selectBuilding(null));
+    document.getElementById('attempt-entry-btn').addEventListener('click', attemptEntry);
+    document.getElementById('refresh-entry-history').addEventListener('click', loadEntryHistory);
     document.getElementById('time-slower').addEventListener('click', () => changeSpeed(-1));
     document.getElementById('time-faster').addEventListener('click', () => changeSpeed(1));
     document.getElementById('time-play').addEventListener('click', toggleTimePause);
@@ -966,4 +1260,6 @@ function bindInterface() {
 
 initScene();
 bindInterface();
+loadWeather();
+setInterval(loadWeather, 10 * 60 * 1000);
 animate();

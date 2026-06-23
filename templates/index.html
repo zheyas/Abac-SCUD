@@ -23,7 +23,7 @@
                 <span class="status-dot" id="session-dot"></span>
                 <div>
                     <div id="username">Гость</div>
-                    <div class="muted" id="role">Авторизация не выполнена</div>
+                    <div class="muted" id="group">Авторизация не выполнена</div>
                 </div>
             </div>
             <div class="shift-badge" id="shift-badge">
@@ -44,6 +44,11 @@
             <span id="calendar-date">—</span>
             <span class="separator">•</span>
             <span id="region-name">Регион пользователя</span>
+        </div>
+        <div id="weather-row" class="weather-row" title="Текущая погода региона">
+            <span id="weather-icon" class="weather-icon">◌</span>
+            <span class="weather-main"><strong id="weather-temp">Погода…</strong><small id="weather-description">Получаем данные региона</small></span>
+            <span id="weather-wind" class="weather-wind">—</span>
         </div>
         <div class="time-controls">
             <button id="time-slower" class="icon-btn" title="Замедлить время" aria-label="Замедлить время">−</button>
@@ -78,6 +83,10 @@
         <div id="building-status-list" class="building-status-list">
             <div class="empty-state">Войдите, чтобы увидеть доступы</div>
         </div>
+        <div class="entry-history">
+            <div class="entry-history-head"><span>Последние попытки</span><button id="refresh-entry-history" aria-label="Обновить журнал">↻</button></div>
+            <div id="entry-history-list" class="entry-history-list"><div class="entry-history-empty">Событий пока нет</div></div>
+        </div>
     </aside>
 
     <section id="building-details" class="building-details glass-panel" aria-live="polite">
@@ -91,6 +100,7 @@
             <span>Рабочие дни</span><strong id="details-days">—</strong>
             <span>Тип доступа</span><strong id="details-type">—</strong>
         </div>
+        <button id="attempt-entry-btn" class="attempt-entry-btn"><span>→</span> Попытаться войти</button>
     </section>
 
     <div class="bottom-dock glass-panel">
@@ -146,6 +156,10 @@
     </div>
 
     <div id="toast" class="toast" role="status"></div>
+    <div id="entry-result" class="entry-result" role="status" aria-live="assertive">
+        <div class="entry-result-icon" id="entry-result-icon">✓</div>
+        <div><strong id="entry-result-title">Вход разрешён</strong><span id="entry-result-reason">—</span></div>
+    </div>
 
     <script type="importmap">
         {

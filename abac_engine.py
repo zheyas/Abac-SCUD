@@ -1,6 +1,6 @@
 import datetime
 
-from models import Building, Policy
+from models import Building, Policy, User
 
 
 def _parse_time(value):
@@ -52,30 +52,31 @@ def evaluate_access(user, building_id, context_datetime=None):
             "reason": "Объект не найден", "schedule": "—"
         }
 
+    user = dict(user)
+    user["shift_status"] = User.get_effective_shift_status(user, now)
     schedule = get_building_schedule_label(building)
     building_open = is_building_open(building, now)
     if not building_open:
         return {
             "access": False, "building_open": False, "status": "closed",
-            "reason": "Закрыто по графику", "schedule": schedule
+            "reason": "Закрыто по графику", "schedule": schedule,
+            "source": "building", "rule_id": None, "rule_name": None
         }
     if not user.get("is_active", True):
         return {
             "access": False, "building_open": True, "status": "denied",
-            "reason": "Учётная запись заблокирована", "schedule": schedule
-        }
-    if building.get("is_accessible_to_all"):
-        return {
-            "access": True, "building_open": True, "status": "available",
-            "reason": "Общий доступ", "schedule": schedule
+            "reason": "Учётная запись заблокирована", "schedule": schedule,
+            "source": "account", "rule_id": None, "rule_name": None
         }
 
-    policies = Policy.get_by_role_building(user["role_id"], building_id)
+    policies = Policy.get_for_user_building(user.get("group_id", user["role_id"]), user["id"], building_id)
     shift_blocked = False
     schedule_blocked = False
     current_time = now.time().replace(tzinfo=None)
     current_day = now.strftime("%a")
 
+    matching_personal = []
+    matching_group = []
     for policy in policies:
         if policy["requires_shift_active"] and user["shift_status"] != "active":
             shift_blocked = True
@@ -91,11 +92,50 @@ def evaluate_access(user, building_id, context_datetime=None):
             continue
         within_window = start <= current_time <= end if start <= end else current_time >= start or current_time <= end
         if within_window:
-            return {
-                "access": True, "building_open": True, "status": "available",
-                "reason": "Разрешено политикой", "schedule": schedule
-            }
+            (matching_personal if policy.get("user_id") else matching_group).append(policy)
+            continue
         schedule_blocked = True
+
+    def decision_from_rules(rules, source):
+        if not rules:
+            return None
+        rule = next((item for item in rules if item.get("effect") == "deny"), rules[0])
+        allowed = rule.get("effect") != "deny"
+        return {
+            "access": allowed,
+            "building_open": True,
+            "status": "available" if allowed else "denied",
+            "reason": "Разрешено персональным правилом" if allowed and source == "user"
+                      else "Запрещено персональным правилом" if source == "user"
+                      else "Разрешено правилом группы" if allowed
+                      else "Запрещено правилом группы",
+            "schedule": schedule,
+            "source": source,
+            "rule_id": rule["id"],
+            "rule_name": rule.get("name") or f"Правило #{rule['id']}"
+        }
+
+    personal_decision = decision_from_rules(matching_personal, "user")
+    if personal_decision:
+        return personal_decision
+
+    if User.has_personal_building_access(user["id"], building_id):
+        return {
+            "access": True, "building_open": True, "status": "available",
+            "reason": "Персональный доступ из карточки", "schedule": schedule,
+            "source": "user_card", "rule_id": None, "rule_name": "Личный допуск"
+        }
+
+    if building.get("is_accessible_to_all"):
+        return {
+            "access": True, "building_open": True, "status": "available",
+            "reason": "Общий доступ", "schedule": schedule,
+            "source": "building", "rule_id": None, "rule_name": "Общий доступ"
+        }
+
+    group_decision = decision_from_rules(matching_group, "group")
+    if group_decision:
+        return group_decision
 
     if shift_blocked:
         reason = "Требуется активная смена"
@@ -105,7 +145,8 @@ def evaluate_access(user, building_id, context_datetime=None):
         reason = "Нет подходящей политики"
     return {
         "access": False, "building_open": True, "status": "denied",
-        "reason": reason, "schedule": schedule
+        "reason": reason, "schedule": schedule,
+        "source": "policy", "rule_id": None, "rule_name": None
     }
 
 

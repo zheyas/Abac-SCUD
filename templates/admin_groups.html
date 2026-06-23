@@ -1,0 +1,91 @@
+{% extends "admin_base.html" %}
+{% block title %}Группы доступа — СКУД{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="page-kicker">Структура доступа</div>
+        <h1>Группы доступа</h1>
+        <p>Пользователь состоит в одной группе и получает все её разрешения. Личные допуски к отдельным зданиям настраиваются в карточке пользователя.</p>
+    </div>
+    <div class="page-count"><strong>{{ groups|length }}</strong><span>групп</span></div>
+</header>
+
+<section class="admin-card">
+    <div class="card-heading">
+        <div><h2>Новая группа</h2><p>Создайте понятную группу, затем назначьте ей здания в правилах доступа.</p></div>
+        <span class="section-badge">Группа</span>
+    </div>
+    <form id="create-group-form" class="form-grid">
+        <label class="field span-3"><span>Название</span><input class="control" name="name" placeholder="Например: Подрядчики" required></label>
+        <label class="field span-6"><span>Описание</span><input class="control" name="description" placeholder="Для кого эта группа и какой у неё уровень доступа"></label>
+        <button class="button button-primary span-3" type="submit"><span>＋</span> Создать группу</button>
+    </form>
+</section>
+
+<section>
+    <div class="card-heading"><div><h2>Все группы</h2><p>Группу с пользователями удалить нельзя — сначала перенесите участников.</p></div></div>
+    <div class="group-card-grid">
+        {% for group in groups %}
+        <article class="access-group-card group-editor" data-id="{{ group.id }}">
+            <div class="access-group-head">
+                <span class="group-avatar">{{ group.name[:1] }}</span>
+                <div class="group-stats">
+                    <span><strong>{{ group.member_count }}</strong> пользователей</span>
+                    <span><strong>{{ group.access_count }}</strong> зданий</span>
+                </div>
+                <div class="user-card-actions">
+                    <button class="button button-ghost save-group" data-id="{{ group.id }}" title="Сохранить">✓</button>
+                    <button class="button button-danger delete-group" data-id="{{ group.id }}" title="Удалить" {% if group.member_count %}disabled{% endif %}>×</button>
+                </div>
+            </div>
+            <label class="compact-label">Название<input class="control edit-group-name" value="{{ group.name }}"></label>
+            <label class="compact-label">Описание<textarea class="control edit-group-description" rows="3" placeholder="Описание группы">{{ group.description }}</textarea></label>
+            <a class="group-rules-link" href="/admin/policies">Настроить доступы группы <span>→</span></a>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('create-group-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        const button = event.submitter;
+        const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+        button.disabled = true;
+        try {
+            await adminRequest('/api/admin/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+            showAdminToast('Группа создана');
+            setTimeout(() => location.reload(), 350);
+        } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
+    });
+
+    document.querySelectorAll('.save-group').forEach(button => button.addEventListener('click', async () => {
+        const card = button.closest('.group-editor');
+        const data = {
+            name: card.querySelector('.edit-group-name').value.trim(),
+            description: card.querySelector('.edit-group-description').value.trim()
+        };
+        button.disabled = true;
+        try {
+            await adminRequest(`/api/admin/groups/${button.dataset.id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+            card.querySelector('.group-avatar').textContent = data.name.slice(0, 1);
+            showAdminToast('Группа обновлена');
+        } catch (error) { showAdminToast(error.message, 'error'); }
+        finally { button.disabled = false; }
+    }));
+
+    document.querySelectorAll('.delete-group').forEach(button => button.addEventListener('click', async () => {
+        const card = button.closest('.group-editor');
+        const name = card.querySelector('.edit-group-name').value;
+        if (!confirm(`Удалить группу «${name}» и её правила доступа?`)) return;
+        button.disabled = true;
+        try {
+            await adminRequest(`/api/admin/groups/${button.dataset.id}`, {method:'DELETE'});
+            card.remove();
+            showAdminToast('Группа удалена');
+        } catch (error) { showAdminToast(error.message, 'error'); button.disabled = false; }
+    }));
+</script>
+{% endblock %}

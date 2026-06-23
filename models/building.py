@@ -42,6 +42,9 @@ class Building:
     @staticmethod
     def delete(building_id):
         conn = Database.get_conn()
+        conn.execute("DELETE FROM access_events WHERE building_id=?", (building_id,))
+        conn.execute("DELETE FROM policies WHERE building_id=?", (building_id,))
+        conn.execute("DELETE FROM user_building_access WHERE building_id=?", (building_id,))
         conn.execute("DELETE FROM buildings WHERE id=?", (building_id,))
         conn.commit()
         conn.close()
