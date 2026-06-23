@@ -51,6 +51,14 @@ class Database:
                 FOREIGN KEY(user_id) REFERENCES users(id),
                 FOREIGN KEY(building_id) REFERENCES buildings(id)
             );
+            CREATE TABLE IF NOT EXISTS user_building_access (
+                user_id INTEGER NOT NULL,
+                building_id INTEGER NOT NULL,
+                granted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(user_id, building_id),
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(building_id) REFERENCES buildings(id)
+            );
         """)
         # Неблокирующая миграция для баз, созданных предыдущей версией приложения.
         building_columns = {row[1] for row in conn.execute("PRAGMA table_info(buildings)").fetchall()}
@@ -86,8 +94,13 @@ class Database:
             if column not in policy_columns:
                 conn.execute(statement)
 
+        role_columns = {row[1] for row in conn.execute("PRAGMA table_info(roles)").fetchall()}
+        if "description" not in role_columns:
+            conn.execute("ALTER TABLE roles ADD COLUMN description TEXT DEFAULT ''")
+
         conn.execute("CREATE INDEX IF NOT EXISTS idx_access_events_time ON access_events(attempted_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_policies_user_building ON policies(user_id, building_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_building_access_user ON user_building_access(user_id)")
         conn.commit()
         conn.close()
 
@@ -199,7 +212,7 @@ class Database:
             """UPDATE policies
                SET name = CASE
                    WHEN name IS NULL OR name = '' THEN 'Доступ: ' ||
-                       COALESCE((SELECT name FROM roles WHERE roles.id = policies.role_id), 'Роль') ||
+                       COALESCE((SELECT name FROM roles WHERE roles.id = policies.role_id), 'Группа') ||
                        ' → ' || COALESCE((SELECT name FROM buildings WHERE buildings.id = policies.building_id), 'Объект')
                    ELSE name END"""
         )

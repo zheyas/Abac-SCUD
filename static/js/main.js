@@ -723,7 +723,7 @@ async function refreshUserInfo() {
     if (!response.ok) return;
     const data = await response.json();
     document.getElementById('username').textContent = currentUser.username;
-    document.getElementById('role').textContent = currentUser.role_name;
+    document.getElementById('group').textContent = `Группа: ${currentUser.group_name || currentUser.role_name}`;
     document.getElementById('session-dot').classList.add('online');
     applyShiftState(data);
     await updateAccessColors(true);
@@ -901,7 +901,7 @@ async function login(username, password) {
         await loadEntryHistory();
         document.getElementById('login-overlay').classList.add('hidden');
         document.getElementById('toggle-shift-btn').disabled = Boolean(currentUser.shift_auto);
-        if (currentUser.role_id === 1) {
+        if ((currentUser.group_id || currentUser.role_id) === 1) {
             document.getElementById('admin-edit-btn').hidden = false;
             document.getElementById('add-building-btn').hidden = false;
         }

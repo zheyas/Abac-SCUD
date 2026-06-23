@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import sqlite3
 import ssl
 import time
 import urllib.error
@@ -9,7 +10,7 @@ import urllib.request
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from database import Database
-from models import User, Building, Policy, Role, AccessEvent
+from models import User, Building, Policy, Group, AccessEvent
 from abac_engine import evaluate_access
 from auth import verify_login
 
@@ -28,7 +29,7 @@ def is_admin():
     if not user_id:
         return False
     user = User.get_by_id(user_id)
-    return user and user.get('role_id') == 1
+    return user and user.get('group_id') == 1
 
 
 def parse_context_datetime(value=None):
@@ -49,16 +50,28 @@ def shift_payload(user, context_datetime=None):
 
 
 def resolve_policy_target(data):
-    target_type = data.get('target_type', 'role')
-    target_id = int(data.get('target_id') or data.get('role_id'))
+    target_type = data.get('target_type', 'group')
+    target_id = int(data.get('target_id') or data.get('group_id') or data.get('role_id'))
     if target_type == 'user':
         user = User.get_by_id(target_id)
         if not user:
             raise ValueError('Пользователь не найден')
-        return user['role_id'], user['id']
-    if not Role.get_by_id(target_id):
-        raise ValueError('Роль не найдена')
+        return user['group_id'], user['id']
+    if target_type not in ('group', 'role'):
+        raise ValueError('Неизвестный тип назначения')
+    if not Group.get_by_id(target_id):
+        raise ValueError('Группа не найдена')
     return target_id, None
+
+
+def parse_group_id(data):
+    try:
+        group_id = int(data.get('group_id', data.get('role_id')))
+    except (TypeError, ValueError):
+        raise ValueError('Выберите группу')
+    if not Group.get_by_id(group_id):
+        raise ValueError('Группа не найдена')
+    return group_id
 
 # ------------------- Главная страница (3D карта) -------------------
 @app.route('/')
@@ -75,7 +88,8 @@ def api_login():
         shift = shift_payload(user)
         return jsonify({'success': True, 'user': {
             'id': user['id'], 'username': user['username'],
-            'role_name': user['role_name'], 'role_id': user['role_id'], **shift
+            'group_name': user['group_name'], 'group_id': user['group_id'],
+            'role_name': user['group_name'], 'role_id': user['group_id'], **shift
         }})
     return jsonify({'success': False, 'error': 'Неверный логин или пароль'})
 
@@ -235,8 +249,16 @@ def admin_users():
     if not is_admin():
         return redirect(url_for('index'))
     users = User.get_all()
-    roles = Role.get_all()
-    return render_template('admin_users.html', users=users, roles=roles)
+    groups = Group.get_all()
+    buildings = Building.get_all()
+    return render_template('admin_users.html', users=users, groups=groups, buildings=buildings)
+
+
+@app.route('/admin/groups')
+def admin_groups():
+    if not is_admin():
+        return redirect(url_for('index'))
+    return render_template('admin_groups.html', groups=Group.get_all())
 
 @app.route('/admin/policies')
 def admin_policies():
@@ -244,9 +266,8 @@ def admin_policies():
         return redirect(url_for('index'))
     policies = Policy.get_all()
     buildings = Building.get_all()
-    roles = Role.get_all()
-    users = User.get_all()
-    return render_template('admin_policies.html', policies=policies, buildings=buildings, roles=roles, users=users)
+    groups = Group.get_all()
+    return render_template('admin_policies.html', policies=policies, buildings=buildings, groups=groups)
 
 
 @app.route('/admin/events')
@@ -292,22 +313,36 @@ def api_admin_create_user():
     if not is_admin():
         return jsonify({'error': 'Unauthorized'}), 403
     data = request.json
-    User.create(
-        data['username'], data['password'], data['role_id'], data.get('shift_auto', False),
-        data.get('shift_days', 'Mon,Tue,Wed,Thu,Fri'), data.get('shift_start', '08:00'),
-        data.get('shift_end', '18:00')
-    )
-    return jsonify({'success': True})
+    try:
+        group_id = parse_group_id(data)
+        user_id = User.create(
+            data['username'], data['password'], group_id, data.get('shift_auto', False),
+            data.get('shift_days', 'Mon,Tue,Wed,Thu,Fri'), data.get('shift_start', '08:00'),
+            data.get('shift_end', '18:00'), data.get('personal_building_ids', [])
+        )
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'Пользователь с таким логином уже существует'}), 409
+    return jsonify({'success': True, 'id': user_id})
 
 @app.route('/api/admin/users/<int:uid>', methods=['PUT'])
 def api_admin_update_user(uid):
     if not is_admin():
         return jsonify({'error': 'Unauthorized'}), 403
     data = request.json
-    User.update(uid, data['username'], data['role_id'], data['is_active'],
-                data.get('password', None), data.get('shift_status'), data.get('shift_auto', False),
-                data.get('shift_days', 'Mon,Tue,Wed,Thu,Fri'), data.get('shift_start', '08:00'),
-                data.get('shift_end', '18:00'))
+    if not User.get_by_id(uid):
+        return jsonify({'error': 'Пользователь не найден'}), 404
+    try:
+        group_id = parse_group_id(data)
+        User.update(uid, data['username'], group_id, data['is_active'],
+                    data.get('password', None), data.get('shift_status'), data.get('shift_auto', False),
+                    data.get('shift_days', 'Mon,Tue,Wed,Thu,Fri'), data.get('shift_start', '08:00'),
+                    data.get('shift_end', '18:00'), data.get('personal_building_ids'))
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'Пользователь с таким логином уже существует'}), 409
     return jsonify({'success': True})
 
 @app.route('/api/admin/users/<int:uid>', methods=['DELETE'])
@@ -317,17 +352,60 @@ def api_admin_delete_user(uid):
     User.delete(uid)
     return jsonify({'success': True})
 
+
+@app.route('/api/admin/groups', methods=['POST'])
+def api_admin_create_group():
+    if not is_admin():
+        return jsonify({'error': 'Unauthorized'}), 403
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Укажите название группы'}), 400
+    try:
+        group_id = Group.create(name, (data.get('description') or '').strip())
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'Группа с таким названием уже существует'}), 409
+    return jsonify({'success': True, 'id': group_id})
+
+
+@app.route('/api/admin/groups/<int:gid>', methods=['PUT'])
+def api_admin_update_group(gid):
+    if not is_admin():
+        return jsonify({'error': 'Unauthorized'}), 403
+    if not Group.get_by_id(gid):
+        return jsonify({'error': 'Группа не найдена'}), 404
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Укажите название группы'}), 400
+    try:
+        Group.update(gid, name, (data.get('description') or '').strip())
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'Группа с таким названием уже существует'}), 409
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/groups/<int:gid>', methods=['DELETE'])
+def api_admin_delete_group(gid):
+    if not is_admin():
+        return jsonify({'error': 'Unauthorized'}), 403
+    if not Group.get_by_id(gid):
+        return jsonify({'error': 'Группа не найдена'}), 404
+    if not Group.delete(gid):
+        return jsonify({'error': 'Сначала перенесите пользователей в другую группу'}), 409
+    return jsonify({'success': True})
+
 @app.route('/api/admin/policies', methods=['POST'])
 def api_admin_create_policy():
     if not is_admin():
         return jsonify({'error': 'Unauthorized'}), 403
     data = request.json
     try:
-        role_id, user_id = resolve_policy_target(data)
+        group_id, user_id = resolve_policy_target(data)
     except (TypeError, ValueError) as error:
         return jsonify({'error': str(error)}), 400
     policy_id = Policy.create(
-        role_id, data['building_id'], data['days_allowed'], data['time_start'], data['time_end'],
+        group_id, data['building_id'], data['days_allowed'], data['time_start'], data['time_end'],
         data.get('requires_shift_active', False), user_id, data.get('name', '').strip(),
         data.get('effect', 'allow'), data.get('is_active', True)
     )
@@ -339,11 +417,11 @@ def api_admin_update_policy(pid):
         return jsonify({'error': 'Unauthorized'}), 403
     data = request.json
     try:
-        role_id, user_id = resolve_policy_target(data)
+        group_id, user_id = resolve_policy_target(data)
     except (TypeError, ValueError) as error:
         return jsonify({'error': str(error)}), 400
     Policy.update(
-        pid, role_id, data['building_id'], data['days_allowed'], data['time_start'], data['time_end'],
+        pid, group_id, data['building_id'], data['days_allowed'], data['time_start'], data['time_end'],
         data.get('requires_shift_active', False), user_id, data.get('name', '').strip(),
         data.get('effect', 'allow'), data.get('is_active', True)
     )

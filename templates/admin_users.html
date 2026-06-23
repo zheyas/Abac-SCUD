@@ -5,20 +5,20 @@
     <div>
         <div class="page-kicker">Персонал</div>
         <h1>Пользователи</h1>
-        <p>Роли, состояние учётных записей и активность рабочих смен.</p>
+        <p>Группы доступа, личные допуски к зданиям и активность рабочих смен.</p>
     </div>
     <div class="page-count"><strong>{{ users|length }}</strong><span>аккаунтов</span></div>
 </header>
 
 <section class="admin-card">
     <div class="card-heading">
-        <div><h2>Новый пользователь</h2><p>Назначьте роль — политики доступа применятся автоматически.</p></div>
+        <div><h2>Новый пользователь</h2><p>Назначьте группу — её правила доступа применятся автоматически.</p></div>
         <span class="section-badge">Добавление</span>
     </div>
     <form id="create-user-form" class="form-grid">
         <label class="field span-3"><span>Логин</span><input class="control" type="text" name="username" placeholder="Логин пользователя" required></label>
         <label class="field span-3"><span>Пароль</span><input class="control" type="password" name="password" placeholder="Минимум 6 символов" required minlength="6"></label>
-        <label class="field span-2"><span>Роль</span><select class="control" name="role_id">{% for role in roles %}<option value="{{ role.id }}">{{ role.name }}</option>{% endfor %}</select></label>
+        <label class="field span-2"><span>Группа</span><select class="control" name="group_id">{% for group in groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}</select></label>
         <label class="switch-row span-2"><input type="checkbox" name="shift_auto" class="create-shift-auto"> Автосмена</label>
         <button class="button button-primary span-2" type="submit"><span>＋</span> Создать</button>
         <label class="field span-4 create-shift-field"><span>Рабочие дни</span><input class="control" name="shift_days" value="Mon,Tue,Wed,Thu,Fri"></label>
@@ -42,7 +42,7 @@
             </div>
             <div class="user-fields">
                 <label class="compact-label">Логин<input class="control edit-username" value="{{ u.username }}"></label>
-                <label class="compact-label">Роль<select class="control edit-role">{% for role in roles %}<option value="{{ role.id }}" {% if role.id == u.role_id %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select></label>
+                <label class="compact-label">Группа<select class="control edit-group">{% for group in groups %}<option value="{{ group.id }}" {% if group.id == u.group_id %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></label>
                 <label class="compact-label">Смена<select class="control edit-shift"><option value="active" {% if u.shift_status == 'active' %}selected{% endif %}>Активна</option><option value="inactive" {% if u.shift_status == 'inactive' %}selected{% endif %}>Неактивна</option></select></label>
                 <label class="switch-row"><input type="checkbox" class="edit-active" {% if u.is_active %}checked{% endif %}> Активен</label>
             </div>
@@ -51,6 +51,20 @@
                 <label class="compact-label">Рабочие дни<input class="control edit-shift-days" value="{{ u.shift_days }}"></label>
                 <label class="compact-label">Начало<input class="control edit-shift-start" type="time" value="{{ u.shift_start }}"></label>
                 <label class="compact-label">Конец<input class="control edit-shift-end" type="time" value="{{ u.shift_end }}"></label>
+            </div>
+            <div class="personal-access-panel">
+                <div class="personal-access-heading">
+                    <div><strong>Личный допуск</strong><span>Дополняет доступы группы для выбранных зданий</span></div>
+                    <span class="personal-count">{{ u.personal_building_ids|length }}</span>
+                </div>
+                <div class="building-grant-grid">
+                    {% for building in buildings %}
+                    <label class="building-grant">
+                        <input type="checkbox" class="personal-building" value="{{ building.id }}" {% if building.id in u.personal_building_ids %}checked{% endif %}>
+                        <span>{{ building.name }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
             </div>
         </article>
         {% endfor %}
@@ -81,7 +95,8 @@
         event.preventDefault();
         const button = event.submitter;
         const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-        data.role_id = Number(data.role_id);
+        data.group_id = Number(data.group_id);
+        data.personal_building_ids = [];
         data.shift_auto = event.currentTarget.querySelector('.create-shift-auto').checked;
         data.shift_days = event.currentTarget.querySelector('[name="shift_days"]').value;
         data.shift_start = event.currentTarget.querySelector('[name="shift_start"]').value;
@@ -98,19 +113,21 @@
         const card = button.closest('.user-editor');
         const data = {
             username: card.querySelector('.edit-username').value.trim(),
-            role_id: Number(card.querySelector('.edit-role').value),
+            group_id: Number(card.querySelector('.edit-group').value),
             shift_status: card.querySelector('.edit-shift').value,
             is_active: card.querySelector('.edit-active').checked,
             shift_auto: card.querySelector('.edit-shift-auto').checked,
             shift_days: card.querySelector('.edit-shift-days').value,
             shift_start: card.querySelector('.edit-shift-start').value,
-            shift_end: card.querySelector('.edit-shift-end').value
+            shift_end: card.querySelector('.edit-shift-end').value,
+            personal_building_ids: [...card.querySelectorAll('.personal-building:checked')].map(input => Number(input.value))
         };
         button.disabled = true;
         try {
             await adminRequest(`/api/admin/users/${button.dataset.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
             card.querySelector('.user-meta strong').textContent = data.username;
             card.querySelector('.avatar').textContent = data.username.slice(0,1);
+            card.querySelector('.personal-count').textContent = data.personal_building_ids.length;
             showAdminToast('Пользователь обновлён');
         } catch (error) { showAdminToast(error.message, 'error'); }
         finally { button.disabled = false; }
